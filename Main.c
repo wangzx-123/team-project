@@ -11,7 +11,7 @@
 #define REP_NUM (3)
 #define FRE_PER_SLICING (1800)
 #define EXTRA_TIME (105)
-#define DISK_NOT_USE -1
+#define DISK_NOT_USE  -1
 
 // 查找最大值及其索引
 static inline int  find_max(const int num[], size_t num_length) {
@@ -41,6 +41,7 @@ typedef struct Request_ {
     int object_id;
     int prev_id;
     bool is_done;
+    int timestamp;//时间戳
 } Request;
 
 typedef struct Object_ {
@@ -53,10 +54,11 @@ typedef struct Object_ {
 
 Request request[MAX_REQUEST_NUM];
 Object object[MAX_OBJECT_NUM];
+int timestamp_current_point = 0;//当前时间戳
 
 int T, M, N, V, G;
 int disk[MAX_DISK_NUM][MAX_DISK_SIZE];
-int disk_point[MAX_DISK_NUM];
+int disk_point[MAX_DISK_NUM];//磁头位置
 int disk_size_left[MAX_DISK_NUM];
 
 void timestamp_action()
@@ -64,7 +66,7 @@ void timestamp_action()
     int timestamp;
     scanf("%*s%d", &timestamp);
     printf("TIMESTAMP %d\n", timestamp);
-
+    timestamp_current_point = timestamp;
     fflush(stdout);
 }
 
@@ -148,7 +150,7 @@ int select_disk(int *object_replica, int replica_current_point) {
         }
     }
     return object_replica[replica_current_point];
-}
+}//选择剩余最多磁盘空间的磁盘
 
 void write_action()
 {
@@ -161,6 +163,8 @@ void write_action()
         memset(object[id].replica, 0, sizeof(object[id].replica));
         for (int j = 1; j <= REP_NUM; j++) {
             object[id].replica[j] = select_disk(object[id].replica, j);
+
+            disk_size_left[object[id].replica[j]] -= size;//更新磁盘剩余空间
             object[id].unit[j] = (int*)malloc(sizeof(int) * (size + 1));
             object[id].size = size;
             object[id].is_delete = false;
@@ -181,6 +185,28 @@ void write_action()
     fflush(stdout);
 }
 
+int t_count(int req_id){//计算f(t)
+    int t_real = timestamp_current_point - request[req_id].timestamp;
+    if(t_real<=10)return (1-0.005*t_real);
+    else if(t_real>10&&t_real<=105)return (1.05-0.01*t_real);
+    else return 0;
+}
+int size_count(int req_id){//计算g(size)
+    return ((object[request[req_id].object_id].size+1)/2);
+}
+int  get_point(){//获取得分最高的请求
+    int point_max=0;
+    int point_max_id=0;
+    for(int i=1;i<MAX_REQUEST_NUM;i++){
+        if(request[i].is_done==true)continue;
+        int point = t_count(i)*size_count(i);
+        if(point>point_max){
+            point_max=point;
+            point_max_id=i;
+        }
+    }
+    return point_max_id;
+}
 void read_action()
 {
     int n_read;
@@ -192,12 +218,13 @@ void read_action()
         request[request_id].prev_id = object[object_id].last_request_point;
         object[object_id].last_request_point = request_id;
         request[request_id].is_done = false;
+        request[request_id].timestamp = timestamp_current_point;
     }
 	
     static int current_request = 0;
     static int current_phase = 0;
     if (!current_request && n_read > 0) {
-        current_request = request_id;
+        current_request = get_point();
     }
     if (!current_request) {
         for (int i = 1; i <= N; i++) {
@@ -256,7 +283,10 @@ int main()
     for (int i = 1; i <= N; i++) {
         disk_size_left[i] = 0.9 * V;
     }
-
+    //初始化磁头位置
+    for (int i = 1; i <= N; i++) {
+        disk_point[i] = 1;
+    }
     for (int i = 1; i <= M; i++) {
         for (int j = 1; j <= (T - 1) / FRE_PER_SLICING + 1; j++) {
             scanf("%*d");
